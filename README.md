@@ -72,12 +72,28 @@ Checks if a custom element is already registered.
 
 Returns a Promise that resolves when the element is defined.
 
+## Fix for Favicon 404 Error
+
+Add this to your HTML `<head>` to prevent the `/favicon.ico` 404 error:
+
+```html
+<link rel="icon" href="data:,">
+```
+
+Or use an inline SVG favicon:
+
+```html
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📄</text></svg>">
+```
+
 ## File Structure
 
 ```
 src/
   init/
     custom-elements-patch.js  # Early initialization script
+  snippets/
+    favicon-fix.html          # Favicon 404 fix snippet
   utils/
     safe-custom-elements.js   # Utility functions for custom elements
 ```
