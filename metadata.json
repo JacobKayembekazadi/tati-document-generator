@@ -1,0 +1,5 @@
+{
+  "name": "Texas American Trade Document Generator",
+  "description": "A tool for the logistics team at Texas American Trade Inc. to quickly generate accurate USA-to-Mexico shipment documents by auto-filling content with correct product specifications, weights, and regulatory details.",
+  "requestFramePermissions": []
+}

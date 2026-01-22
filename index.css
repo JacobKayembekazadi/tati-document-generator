@@ -1,0 +1,112 @@
+/* Base styles for TATI Document Generator */
+/* Tailwind CSS is loaded via CDN in index.html */
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Print Styles */
+@media print {
+  /* Hide non-document elements */
+  .no-print,
+  [data-no-print] {
+    display: none !important;
+  }
+
+  /* Enable exact color printing (backgrounds + colors preserved) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  /* Preserve dark backgrounds exactly as they appear on screen */
+  .bg-slate-900 {
+    background-color: #0f172a !important;
+  }
+
+  .bg-slate-800 {
+    background-color: #1e293b !important;
+  }
+
+  .bg-black {
+    background-color: #000000 !important;
+  }
+
+  /* Keep white text white on dark backgrounds */
+  .text-white {
+    color: #ffffff !important;
+  }
+
+  /* Keep colored text visible */
+  .text-blue-400 {
+    color: #60a5fa !important;
+  }
+
+  /* Light gray labels should be slightly darker for print readability */
+  .text-slate-400 {
+    color: #94a3b8 !important;
+  }
+
+  .text-slate-500 {
+    color: #64748b !important;
+  }
+
+  /* Document container takes full width */
+  .print-container {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Ensure document content is visible */
+  .document-content {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  /* Page break controls */
+  .page-break-before {
+    page-break-before: always;
+  }
+
+  .page-break-after {
+    page-break-after: always;
+  }
+
+  .avoid-break {
+    page-break-inside: avoid;
+  }
+
+  /* Table styling for print */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  th, td {
+    border: 1px solid #333 !important;
+    padding: 4px 8px;
+  }
+
+  /* Hide scrollbars */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Set page margins */
+  @page {
+    margin: 0.5in;
+    size: letter;
+  }
+
+  /* Ensure links don't show URL */
+  a[href]:after {
+    content: none !important;
+  }
+}
