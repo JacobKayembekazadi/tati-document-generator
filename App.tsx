@@ -1182,13 +1182,12 @@ const App: React.FC = () => {
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder={apiKey ? "Ask me anything about shipping, products, or create a shipment..." : "Enter your API key first..."}
-                    disabled={!apiKey}
-                    className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100"
+                    placeholder="Ask me anything about shipping, products, or create a shipment..."
+                    className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                   <button
                     onClick={handleSendMessage}
-                    disabled={!chatInput.trim() || isChatLoading || !apiKey}
+                    disabled={!chatInput.trim() || isChatLoading}
                     className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-6 py-3 rounded-xl flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm"
                   >
                     <Send size={16} />

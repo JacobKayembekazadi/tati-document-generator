@@ -1,14 +1,80 @@
-// Vercel Serverless Function for OpenAI Chat
-// This keeps the API key secure on the server side
+// Vercel Serverless Function - API Agnostic AI Chat
+// Supports: OpenAI, Anthropic Claude, Google Gemini
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// CORS headers
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+// Supported AI providers
+type AIProvider = 'openai' | 'anthropic' | 'google';
+
+// Provider configurations
+const PROVIDER_CONFIG: Record<AIProvider, {
+  url: string;
+  defaultModel: string;
+  authHeader: (key: string) => Record<string, string>;
+  formatRequest: (messages: Message[], systemPrompt: string, model: string) => object;
+  parseResponse: (data: unknown) => string;
+}> = {
+  openai: {
+    url: 'https://api.openai.com/v1/chat/completions',
+    defaultModel: 'gpt-4o-mini',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    formatRequest: (messages, systemPrompt, model) => ({
+      model,
+      messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      max_tokens: 1500,
+      temperature: 0.7,
+    }),
+    parseResponse: (data) => {
+      const d = data as { choices?: { message?: { content?: string } }[] };
+      return d.choices?.[0]?.message?.content || '';
+    },
+  },
+  anthropic: {
+    url: 'https://api.anthropic.com/v1/messages',
+    defaultModel: 'claude-3-haiku-20240307',
+    authHeader: (key) => ({
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    }),
+    formatRequest: (messages, systemPrompt, model) => ({
+      model,
+      system: systemPrompt,
+      messages: messages.map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content,
+      })),
+      max_tokens: 1500,
+    }),
+    parseResponse: (data) => {
+      const d = data as { content?: { text?: string }[] };
+      return d.content?.[0]?.text || '';
+    },
+  },
+  google: {
+    url: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+    defaultModel: 'gemini-1.5-flash',
+    authHeader: () => ({}), // Google uses URL param for API key
+    formatRequest: (messages, systemPrompt, _model) => ({
+      contents: [
+        ...messages.map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }],
+        })),
+      ],
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      generationConfig: { maxOutputTokens: 1500, temperature: 0.7 },
+    }),
+    parseResponse: (data) => {
+      const d = data as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+      return d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    },
+  },
 };
+
+interface Message {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
 
 // Product database for context
 const PRODUCTS = [
@@ -94,7 +160,7 @@ When users ask to UPDATE customer info:
 \`\`\`
 
 ### 3. GENERATE CHARTS
-When users ask for visualizations, charts, or graphs, respond with a chart block. Use this format:
+When users ask for visualizations, charts, or graphs, respond with a chart block:
 \`\`\`chart
 {
   "type": "bar",
@@ -106,17 +172,7 @@ When users ask for visualizations, charts, or graphs, respond with a chart block
 }
 \`\`\`
 
-Chart types available:
-- "bar" - for comparisons (products, weights, values)
-- "line" - for trends over time
-- "pie" - for proportions/percentages
-
-Example chart requests and responses:
-- "Show product densities" → bar chart with product names and density values
-- "Compare hazmat vs non-hazmat products" → pie chart
-- "Show weight distribution" → bar chart
-
-Always include meaningful titles. Use the data property with "name" and "value" keys.
+Chart types: "bar" (comparisons), "line" (trends), "pie" (proportions)
 
 ### 4. GENERATE TABLES
 Use markdown tables for structured data:
@@ -137,10 +193,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  // Get provider from env (default to openai for backwards compatibility)
+  const provider = (process.env.AI_PROVIDER || 'openai').toLowerCase() as AIProvider;
+
+  // Get API key - check provider-specific key first, then generic
+  const apiKey = process.env.AI_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.GOOGLE_API_KEY;
+
   if (!apiKey) {
-    return res.status(500).json({ error: 'OpenAI API key not configured' });
+    return res.status(500).json({
+      error: `API key not configured. Set AI_API_KEY or ${provider.toUpperCase()}_API_KEY in environment variables.`
+    });
   }
+
+  // Validate provider
+  if (!PROVIDER_CONFIG[provider]) {
+    return res.status(500).json({
+      error: `Invalid AI_PROVIDER: ${provider}. Supported: openai, anthropic, google`
+    });
+  }
+
+  const config = PROVIDER_CONFIG[provider];
+  const model = process.env.AI_MODEL || config.defaultModel;
 
   try {
     const { messages, shipmentContext } = req.body;
@@ -162,32 +238,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - Has Hazmat: ${shipmentContext.hasHazmat ? 'Yes' : 'No'}`;
     }
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Build URL (Google requires model in URL)
+    let url = config.url;
+    if (provider === 'google') {
+      url = url.replace('{model}', model) + `?key=${apiKey}`;
+    }
+
+    // Make API request
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        ...config.authHeader(apiKey),
       },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: contextPrompt },
-          ...messages,
-        ],
-        max_tokens: 1000,
-        temperature: 0.7,
-      }),
+      body: JSON.stringify(config.formatRequest(messages, contextPrompt, model)),
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      return res.status(response.status).json({ error: error.error?.message || 'OpenAI API error' });
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage =
+        (errorData as { error?: { message?: string } }).error?.message ||
+        (errorData as { error?: string }).error ||
+        `${provider} API error`;
+      return res.status(response.status).json({ error: errorMessage });
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || 'Sorry, I could not process that request.';
+    const content = config.parseResponse(data) || 'Sorry, I could not process that request.';
 
-    return res.status(200).json({ content });
+    return res.status(200).json({ content, provider, model });
   } catch (error) {
     console.error('Chat API error:', error);
     return res.status(500).json({ error: 'Internal server error' });
