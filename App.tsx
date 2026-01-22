@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   FileText,
   Package,
@@ -31,7 +31,128 @@ import {
   Eye,
   Calendar,
   X,
+  XCircle,
+  AlertCircle,
 } from 'lucide-react';
+
+// Toast notification types and component
+type ToastType = 'success' | 'error' | 'warning' | 'info';
+interface Toast {
+  id: string;
+  message: string;
+  type: ToastType;
+}
+
+const ToastContainer: React.FC<{ toasts: Toast[]; onDismiss: (id: string) => void }> = ({ toasts, onDismiss }) => {
+  if (toasts.length === 0) return null;
+
+  const getToastStyles = (type: ToastType) => {
+    switch (type) {
+      case 'success': return 'bg-green-600 text-white';
+      case 'error': return 'bg-red-600 text-white';
+      case 'warning': return 'bg-amber-500 text-white';
+      case 'info': return 'bg-blue-600 text-white';
+    }
+  };
+
+  const getIcon = (type: ToastType) => {
+    switch (type) {
+      case 'success': return <CheckCircle2 size={18} />;
+      case 'error': return <XCircle size={18} />;
+      case 'warning': return <AlertTriangle size={18} />;
+      case 'info': return <Info size={18} />;
+    }
+  };
+
+  return (
+    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 print:hidden">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg ${getToastStyles(toast.type)} animate-slide-in`}
+        >
+          {getIcon(toast.type)}
+          <span className="text-sm font-medium">{toast.message}</span>
+          <button onClick={() => onDismiss(toast.id)} className="ml-2 hover:opacity-70">
+            <X size={16} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// Confirmation dialog component
+interface ConfirmDialogProps {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  variant?: 'danger' | 'warning' | 'info';
+}
+
+const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
+  isOpen,
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  onConfirm,
+  onCancel,
+  variant = 'danger',
+}) => {
+  if (!isOpen) return null;
+
+  const variantStyles = {
+    danger: 'bg-red-600 hover:bg-red-700',
+    warning: 'bg-amber-500 hover:bg-amber-600',
+    info: 'bg-blue-600 hover:bg-blue-700',
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] print:hidden">
+      <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 animate-scale-in">
+        <div className="flex items-start gap-4">
+          <div className={`p-2 rounded-full ${variant === 'danger' ? 'bg-red-100' : variant === 'warning' ? 'bg-amber-100' : 'bg-blue-100'}`}>
+            <AlertCircle size={24} className={variant === 'danger' ? 'text-red-600' : variant === 'warning' ? 'text-amber-600' : 'text-blue-600'} />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-bold text-slate-900">{title}</h3>
+            <p className="text-slate-600 mt-1">{message}</p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${variantStyles[variant]}`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Form validation types
+interface ValidationErrors {
+  customerName?: string;
+  mexicoAddress?: string;
+  rfc?: string;
+  poNumber?: string;
+  carrier?: string;
+  broker?: string;
+  items?: string;
+}
 import OpenAI from 'openai';
 import {
   ShipmentFormData,
@@ -308,6 +429,49 @@ const App: React.FC = () => {
   const [activeDoc, setActiveDoc] = useState<DocumentTab>('summary');
   const [copiedDoc, setCopiedDoc] = useState<string | null>(null);
 
+  // Toast notification state
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    variant?: 'danger' | 'warning' | 'info';
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+
+  // Form validation state
+  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
+  const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
+
+  // Toast helper functions
+  const showToast = useCallback((message: string, type: ToastType = 'info') => {
+    const id = Date.now().toString();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Confirmation dialog helper
+  const showConfirm = useCallback((
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    variant: 'danger' | 'warning' | 'info' = 'danger'
+  ) => {
+    setConfirmDialog({ isOpen: true, title, message, onConfirm, variant });
+  }, []);
+
+  const closeConfirm = useCallback(() => {
+    setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+  }, []);
+
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
@@ -319,14 +483,33 @@ const App: React.FC = () => {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('openai_api_key') || '');
+  const [apiKey, setApiKey] = useState(() => {
+    try {
+      return localStorage.getItem('openai_api_key') || '';
+    } catch (e) {
+      console.error('Failed to load API key:', e);
+      return '';
+    }
+  });
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Saved shipments state
+  // Saved shipments state - with error handling
   const [savedShipments, setSavedShipments] = useState<SavedShipment[]>(() => {
-    const saved = localStorage.getItem('saved_shipments');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('saved_shipments');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Validate that it's an array
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+      return [];
+    } catch (e) {
+      console.error('Failed to load saved shipments:', e);
+      return [];
+    }
   });
 
   const [formData, setFormData] = useState<ShipmentFormData>({
@@ -520,17 +703,77 @@ const App: React.FC = () => {
   // Save API key to localStorage when it changes
   useEffect(() => {
     if (apiKey) {
-      localStorage.setItem('openai_api_key', apiKey);
+      try {
+        localStorage.setItem('openai_api_key', apiKey);
+      } catch (e) {
+        console.error('Failed to save API key:', e);
+        showToast('Failed to save API key. Storage may be full.', 'error');
+      }
     }
-  }, [apiKey]);
+  }, [apiKey, showToast]);
 
   // Save shipments to localStorage when they change
   useEffect(() => {
-    localStorage.setItem('saved_shipments', JSON.stringify(savedShipments));
-  }, [savedShipments]);
+    try {
+      localStorage.setItem('saved_shipments', JSON.stringify(savedShipments));
+    } catch (e) {
+      console.error('Failed to save shipments:', e);
+      showToast('Failed to save shipments. Storage may be full.', 'error');
+    }
+  }, [savedShipments, showToast]);
 
-  // Save current shipment
+  // Form validation function
+  const validateForm = useCallback((): ValidationErrors => {
+    const errors: ValidationErrors = {};
+
+    if (!formData.customerName.trim()) {
+      errors.customerName = 'Customer name is required';
+    }
+
+    if (!formData.mexicoAddress.trim()) {
+      errors.mexicoAddress = 'Mexico address is required';
+    }
+
+    if (!formData.rfc.trim()) {
+      errors.rfc = 'RFC (Tax ID) is required';
+    } else if (!/^[A-Z&Ñ]{3,4}[0-9]{6}[A-Z0-9]{3}$/i.test(formData.rfc.trim())) {
+      errors.rfc = 'Invalid RFC format (e.g., ABC123456XYZ)';
+    }
+
+    if (!formData.poNumber.trim()) {
+      errors.poNumber = 'PO Number is required';
+    }
+
+    if (!formData.carrier.trim()) {
+      errors.carrier = 'Carrier is required';
+    }
+
+    if (!formData.broker.trim()) {
+      errors.broker = 'Customs agent is required';
+    }
+
+    // Validate items
+    const hasInvalidItems = formData.items.some(
+      (item) => item.quantity <= 0 || item.unitPrice <= 0
+    );
+    if (hasInvalidItems) {
+      errors.items = 'All items must have quantity and price greater than 0';
+    }
+
+    return errors;
+  }, [formData]);
+
+  // Save current shipment with validation
   const handleSaveShipment = () => {
+    setHasAttemptedSubmit(true);
+    const errors = validateForm();
+    setValidationErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      showToast('Please fix the validation errors before saving', 'error');
+      return;
+    }
+
     const newShipment: SavedShipment = {
       id: Date.now().toString(),
       invoiceNumber: calculations.invoiceNumber,
@@ -544,17 +787,30 @@ const App: React.FC = () => {
       formData: { ...formData },
     };
     setSavedShipments((prev) => [newShipment, ...prev]);
+    showToast(`Shipment ${calculations.invoiceNumber} saved successfully!`, 'success');
   };
 
   // Load a saved shipment
   const handleLoadShipment = (shipment: SavedShipment) => {
     setFormData(shipment.formData);
+    setHasAttemptedSubmit(false);
+    setValidationErrors({});
     setView('builder');
+    showToast(`Loaded shipment ${shipment.invoiceNumber}`, 'info');
   };
 
-  // Delete a saved shipment
-  const handleDeleteShipment = (id: string) => {
-    setSavedShipments((prev) => prev.filter((s) => s.id !== id));
+  // Delete a saved shipment - with confirmation
+  const handleDeleteShipment = (id: string, invoiceNumber: string) => {
+    showConfirm(
+      'Delete Shipment?',
+      `Are you sure you want to delete shipment ${invoiceNumber}? This action cannot be undone.`,
+      () => {
+        setSavedShipments((prev) => prev.filter((s) => s.id !== id));
+        showToast(`Shipment ${invoiceNumber} deleted`, 'success');
+        closeConfirm();
+      },
+      'danger'
+    );
   };
 
   // OpenAI Chat function
@@ -993,7 +1249,7 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
                             <Eye size={14} /> Load
                           </button>
                           <button
-                            onClick={() => handleDeleteShipment(shipment.id)}
+                            onClick={() => handleDeleteShipment(shipment.id, shipment.invoiceNumber)}
                             className="bg-red-100 hover:bg-red-200 text-red-600 p-2 rounded-lg transition-all"
                           >
                             <Trash2 size={14} />
@@ -1170,19 +1426,29 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
               <Building2 size={16} className="text-blue-600" /> Customer & Logistics
             </h2>
             <div className="space-y-3">
-              <input
-                type="text"
-                placeholder="Customer Name *"
-                value={formData.customerName}
-                onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
-                className="w-full border p-2.5 rounded-xl text-xs"
-              />
-              <textarea
-                placeholder="Customer Mexico Address (Final) *"
-                value={formData.mexicoAddress}
-                onChange={(e) => setFormData({ ...formData, mexicoAddress: e.target.value })}
-                className="w-full border p-2.5 rounded-xl text-xs h-16"
-              />
+              <div>
+                <input
+                  type="text"
+                  placeholder="Customer Name *"
+                  value={formData.customerName}
+                  onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+                  className={`w-full border p-2.5 rounded-xl text-xs ${hasAttemptedSubmit && validationErrors.customerName ? 'border-red-500 bg-red-50' : ''}`}
+                />
+                {hasAttemptedSubmit && validationErrors.customerName && (
+                  <p className="text-red-500 text-[10px] mt-1 flex items-center gap-1"><AlertCircle size={10} />{validationErrors.customerName}</p>
+                )}
+              </div>
+              <div>
+                <textarea
+                  placeholder="Customer Mexico Address (Final) *"
+                  value={formData.mexicoAddress}
+                  onChange={(e) => setFormData({ ...formData, mexicoAddress: e.target.value })}
+                  className={`w-full border p-2.5 rounded-xl text-xs h-16 ${hasAttemptedSubmit && validationErrors.mexicoAddress ? 'border-red-500 bg-red-50' : ''}`}
+                />
+                {hasAttemptedSubmit && validationErrors.mexicoAddress && (
+                  <p className="text-red-500 text-[10px] mt-1 flex items-center gap-1"><AlertCircle size={10} />{validationErrors.mexicoAddress}</p>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <input
                   type="text"
@@ -1200,7 +1466,7 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
                 />
               </div>
               <textarea
-                placeholder="Customer Laredo Address (Transfer Point) *"
+                placeholder="Customer Laredo Address (Transfer Point)"
                 value={formData.laredoAddress}
                 onChange={(e) => setFormData({ ...formData, laredoAddress: e.target.value })}
                 className="w-full border p-2.5 rounded-xl text-xs h-16"
@@ -1222,20 +1488,30 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
                 />
               </div>
               <div className="grid grid-cols-2 gap-2 border-t pt-2 mt-2">
-                <input
-                  type="text"
-                  placeholder="RFC (Tax ID) *"
-                  value={formData.rfc}
-                  onChange={(e) => setFormData({ ...formData, rfc: e.target.value })}
-                  className="w-full border p-2.5 rounded-xl text-xs font-bold"
-                />
-                <input
-                  type="text"
-                  placeholder="PO Number *"
-                  value={formData.poNumber}
-                  onChange={(e) => setFormData({ ...formData, poNumber: e.target.value })}
-                  className="w-full border p-2.5 rounded-xl text-xs font-bold"
-                />
+                <div>
+                  <input
+                    type="text"
+                    placeholder="RFC (Tax ID) *"
+                    value={formData.rfc}
+                    onChange={(e) => setFormData({ ...formData, rfc: e.target.value.toUpperCase() })}
+                    className={`w-full border p-2.5 rounded-xl text-xs font-bold ${hasAttemptedSubmit && validationErrors.rfc ? 'border-red-500 bg-red-50' : ''}`}
+                  />
+                  {hasAttemptedSubmit && validationErrors.rfc && (
+                    <p className="text-red-500 text-[10px] mt-1 flex items-center gap-1"><AlertCircle size={10} />{validationErrors.rfc}</p>
+                  )}
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="PO Number *"
+                    value={formData.poNumber}
+                    onChange={(e) => setFormData({ ...formData, poNumber: e.target.value })}
+                    className={`w-full border p-2.5 rounded-xl text-xs font-bold ${hasAttemptedSubmit && validationErrors.poNumber ? 'border-red-500 bg-red-50' : ''}`}
+                  />
+                  {hasAttemptedSubmit && validationErrors.poNumber && (
+                    <p className="text-red-500 text-[10px] mt-1 flex items-center gap-1"><AlertCircle size={10} />{validationErrors.poNumber}</p>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1280,20 +1556,30 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  placeholder="US Carrier *"
-                  value={formData.carrier}
-                  onChange={(e) => setFormData({ ...formData, carrier: e.target.value })}
-                  className="w-full border p-2.5 rounded-xl text-xs"
-                />
-                <input
-                  type="text"
-                  placeholder="Customs Agent *"
-                  value={formData.broker}
-                  onChange={(e) => setFormData({ ...formData, broker: e.target.value })}
-                  className="w-full border p-2.5 rounded-xl text-xs"
-                />
+                <div>
+                  <input
+                    type="text"
+                    placeholder="US Carrier *"
+                    value={formData.carrier}
+                    onChange={(e) => setFormData({ ...formData, carrier: e.target.value })}
+                    className={`w-full border p-2.5 rounded-xl text-xs ${hasAttemptedSubmit && validationErrors.carrier ? 'border-red-500 bg-red-50' : ''}`}
+                  />
+                  {hasAttemptedSubmit && validationErrors.carrier && (
+                    <p className="text-red-500 text-[10px] mt-1 flex items-center gap-1"><AlertCircle size={10} />{validationErrors.carrier}</p>
+                  )}
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Customs Agent *"
+                    value={formData.broker}
+                    onChange={(e) => setFormData({ ...formData, broker: e.target.value })}
+                    className={`w-full border p-2.5 rounded-xl text-xs ${hasAttemptedSubmit && validationErrors.broker ? 'border-red-500 bg-red-50' : ''}`}
+                  />
+                  {hasAttemptedSubmit && validationErrors.broker && (
+                    <p className="text-red-500 text-[10px] mt-1 flex items-center gap-1"><AlertCircle size={10} />{validationErrors.broker}</p>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <input
@@ -2386,7 +2672,32 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
           .bg-black { background-color: black !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .text-white { color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
+        @keyframes slide-in {
+          from { transform: translateX(100%); opacity: 0; }
+          to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes scale-in {
+          from { transform: scale(0.95); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+        .animate-slide-in { animation: slide-in 0.3s ease-out; }
+        .animate-scale-in { animation: scale-in 0.2s ease-out; }
       `}</style>
+
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Confirmation dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={closeConfirm}
+        variant={confirmDialog.variant}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+      />
     </div>
   );
 };
