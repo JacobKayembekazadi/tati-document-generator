@@ -376,14 +376,24 @@ const App: React.FC = () => {
                   >
                     <Trash2 size={14} />
                   </button>
-                  <div className="flex items-center gap-2">
-                    <span className="bg-blue-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow-sm">
-                      {idx + 1}
-                    </span>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                      <span className="bg-blue-600 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+                        {idx + 1}
+                      </span>
+                      Product Name
+                    </label>
                     <select
                       value={item.productId}
                       onChange={(e) => updateItem(item.id, 'productId', e.target.value)}
-                      className="flex-1 bg-transparent font-bold text-xs outline-none text-slate-700"
+                      className="w-full bg-white border border-slate-300 p-2.5 rounded-lg text-xs font-bold text-slate-800 cursor-pointer hover:border-blue-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all appearance-none"
+                      style={{
+                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                        backgroundRepeat: 'no-repeat',
+                        backgroundPosition: 'right 0.5rem center',
+                        backgroundSize: '1.25rem',
+                        paddingRight: '2.5rem',
+                      }}
                     >
                       {PRODUCT_DATABASE.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -411,7 +421,14 @@ const App: React.FC = () => {
                       <select
                         value={item.unitType}
                         onChange={(e) => updateItem(item.id, 'unitType', e.target.value)}
-                        className="w-full bg-white border p-2 rounded-lg text-xs"
+                        className="w-full bg-white border border-slate-300 p-2 rounded-lg text-xs cursor-pointer hover:border-blue-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all appearance-none"
+                        style={{
+                          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                          backgroundRepeat: 'no-repeat',
+                          backgroundPosition: 'right 0.5rem center',
+                          backgroundSize: '1rem',
+                          paddingRight: '2rem',
+                        }}
                       >
                         <option value="totes">Totes</option>
                         <option value="drums">Drums</option>
@@ -547,6 +564,17 @@ const App: React.FC = () => {
                     type="text"
                     value={formData.baseInvoice}
                     onChange={(e) => setFormData({ ...formData, baseInvoice: e.target.value })}
+                    className="w-full border p-2.5 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-slate-400 uppercase">
+                    Invoice Seq #
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.sequence}
+                    onChange={(e) => setFormData({ ...formData, sequence: e.target.value })}
                     className="w-full border p-2.5 rounded-xl text-xs font-bold"
                   />
                 </div>
