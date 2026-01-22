@@ -56,6 +56,253 @@ import {
   generateLabId,
 } from './constants';
 
+// Markdown-like formatting for chat messages
+const FormattedMessage: React.FC<{ content: string; isUser?: boolean }> = ({ content, isUser }) => {
+  const formatContent = (text: string): React.ReactNode[] => {
+    const elements: React.ReactNode[] = [];
+    const lines = text.split('\n');
+    let i = 0;
+    let listItems: string[] = [];
+    let isOrderedList = false;
+    let tableRows: string[][] = [];
+    let inCodeBlock = false;
+    let codeBlockContent: string[] = [];
+    let codeBlockLang = '';
+
+    const flushList = () => {
+      if (listItems.length > 0) {
+        const ListTag = isOrderedList ? 'ol' : 'ul';
+        elements.push(
+          <ListTag key={`list-${i}`} className={`my-2 ${isOrderedList ? 'list-decimal' : 'list-disc'} list-inside space-y-1`}>
+            {listItems.map((item, idx) => (
+              <li key={idx} className="text-sm">{formatInlineText(item)}</li>
+            ))}
+          </ListTag>
+        );
+        listItems = [];
+      }
+    };
+
+    const flushTable = () => {
+      if (tableRows.length > 0) {
+        const headerRow = tableRows[0];
+        const bodyRows = tableRows.slice(2); // Skip header and separator
+        elements.push(
+          <div key={`table-${i}`} className="my-3 overflow-x-auto">
+            <table className={`w-full text-xs border-collapse ${isUser ? 'border-blue-400' : 'border-slate-300'}`}>
+              <thead>
+                <tr className={isUser ? 'bg-blue-500/30' : 'bg-slate-100'}>
+                  {headerRow.map((cell, idx) => (
+                    <th key={idx} className={`px-3 py-2 text-left font-bold border ${isUser ? 'border-blue-400' : 'border-slate-300'}`}>
+                      {cell.trim()}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bodyRows.map((row, rowIdx) => (
+                  <tr key={rowIdx} className={rowIdx % 2 === 0 ? '' : (isUser ? 'bg-blue-500/10' : 'bg-slate-50')}>
+                    {row.map((cell, cellIdx) => (
+                      <td key={cellIdx} className={`px-3 py-2 border ${isUser ? 'border-blue-400' : 'border-slate-300'}`}>
+                        {cell.trim()}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        tableRows = [];
+      }
+    };
+
+    const flushCodeBlock = () => {
+      if (codeBlockContent.length > 0) {
+        elements.push(
+          <div key={`code-${i}`} className="my-3">
+            {codeBlockLang && (
+              <div className={`text-[10px] font-mono px-3 py-1 rounded-t-lg ${isUser ? 'bg-blue-800 text-blue-200' : 'bg-slate-700 text-slate-300'}`}>
+                {codeBlockLang}
+              </div>
+            )}
+            <pre className={`p-3 rounded-lg ${codeBlockLang ? 'rounded-t-none' : ''} overflow-x-auto text-xs font-mono ${isUser ? 'bg-blue-800/50 text-blue-100' : 'bg-slate-800 text-slate-100'}`}>
+              <code>{codeBlockContent.join('\n')}</code>
+            </pre>
+          </div>
+        );
+        codeBlockContent = [];
+        codeBlockLang = '';
+      }
+    };
+
+    const formatInlineText = (text: string): React.ReactNode => {
+      // Process inline formatting
+      const parts: React.ReactNode[] = [];
+      let remaining = text;
+      let keyCounter = 0;
+
+      while (remaining.length > 0) {
+        // Bold: **text** or __text__
+        const boldMatch = remaining.match(/^(\*\*|__)(.+?)\1/);
+        if (boldMatch) {
+          parts.push(<strong key={keyCounter++} className="font-bold">{boldMatch[2]}</strong>);
+          remaining = remaining.slice(boldMatch[0].length);
+          continue;
+        }
+
+        // Italic: *text* or _text_
+        const italicMatch = remaining.match(/^(\*|_)([^*_]+?)\1/);
+        if (italicMatch) {
+          parts.push(<em key={keyCounter++} className="italic">{italicMatch[2]}</em>);
+          remaining = remaining.slice(italicMatch[0].length);
+          continue;
+        }
+
+        // Inline code: `code`
+        const codeMatch = remaining.match(/^`([^`]+)`/);
+        if (codeMatch) {
+          parts.push(
+            <code key={keyCounter++} className={`px-1.5 py-0.5 rounded font-mono text-[11px] ${isUser ? 'bg-blue-500/30' : 'bg-slate-200 text-slate-700'}`}>
+              {codeMatch[1]}
+            </code>
+          );
+          remaining = remaining.slice(codeMatch[0].length);
+          continue;
+        }
+
+        // Link: [text](url)
+        const linkMatch = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
+        if (linkMatch) {
+          parts.push(
+            <a key={keyCounter++} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className={`underline ${isUser ? 'text-blue-200' : 'text-blue-600'}`}>
+              {linkMatch[1]}
+            </a>
+          );
+          remaining = remaining.slice(linkMatch[0].length);
+          continue;
+        }
+
+        // Regular character
+        const nextSpecial = remaining.slice(1).search(/[\*_`\[]/);
+        if (nextSpecial === -1) {
+          parts.push(remaining);
+          break;
+        } else {
+          parts.push(remaining.slice(0, nextSpecial + 1));
+          remaining = remaining.slice(nextSpecial + 1);
+        }
+      }
+
+      return parts.length === 1 ? parts[0] : <>{parts}</>;
+    };
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Code block start/end
+      if (line.startsWith('```')) {
+        if (inCodeBlock) {
+          flushCodeBlock();
+          inCodeBlock = false;
+        } else {
+          flushList();
+          flushTable();
+          inCodeBlock = true;
+          codeBlockLang = line.slice(3).trim();
+        }
+        i++;
+        continue;
+      }
+
+      if (inCodeBlock) {
+        codeBlockContent.push(line);
+        i++;
+        continue;
+      }
+
+      // Table row
+      if (line.includes('|') && line.trim().startsWith('|')) {
+        flushList();
+        const cells = line.split('|').slice(1, -1);
+        if (!line.match(/^\|[\s-:|]+\|$/)) {
+          tableRows.push(cells);
+        } else {
+          tableRows.push(cells); // Keep separator for processing
+        }
+        i++;
+        continue;
+      } else if (tableRows.length > 0) {
+        flushTable();
+      }
+
+      // Heading
+      const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+      if (headingMatch) {
+        flushList();
+        const level = headingMatch[1].length;
+        const sizes = ['text-xl', 'text-lg', 'text-base', 'text-sm', 'text-sm', 'text-xs'];
+        elements.push(
+          <p key={`h-${i}`} className={`${sizes[level - 1]} font-bold my-2`}>
+            {formatInlineText(headingMatch[2])}
+          </p>
+        );
+        i++;
+        continue;
+      }
+
+      // Unordered list item
+      if (line.match(/^[\s]*[-*•]\s+/)) {
+        if (listItems.length > 0 && isOrderedList) {
+          flushList();
+        }
+        isOrderedList = false;
+        listItems.push(line.replace(/^[\s]*[-*•]\s+/, ''));
+        i++;
+        continue;
+      }
+
+      // Ordered list item
+      if (line.match(/^[\s]*\d+[.)]\s+/)) {
+        if (listItems.length > 0 && !isOrderedList) {
+          flushList();
+        }
+        isOrderedList = true;
+        listItems.push(line.replace(/^[\s]*\d+[.)]\s+/, ''));
+        i++;
+        continue;
+      }
+
+      // Flush any pending list
+      flushList();
+
+      // Empty line
+      if (line.trim() === '') {
+        elements.push(<br key={`br-${i}`} />);
+        i++;
+        continue;
+      }
+
+      // Regular paragraph
+      elements.push(
+        <p key={`p-${i}`} className="text-sm my-1">
+          {formatInlineText(line)}
+        </p>
+      );
+      i++;
+    }
+
+    // Flush remaining
+    flushList();
+    flushTable();
+    flushCodeBlock();
+
+    return elements;
+  };
+
+  return <div className="space-y-1">{formatContent(content)}</div>;
+};
+
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>('builder');
   const [activeDoc, setActiveDoc] = useState<DocumentTab>('summary');
@@ -630,7 +877,7 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
                           <span className="text-sm">Thinking...</span>
                         </div>
                       ) : (
-                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                        <FormattedMessage content={message.content} isUser={message.role === 'user'} />
                       )}
                       <p className={`text-[10px] mt-1 ${message.role === 'user' ? 'text-blue-200' : 'text-slate-400'}`}>
                         {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
