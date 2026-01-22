@@ -76,3 +76,26 @@ export type DocumentTab =
   | 'coq'
   | 'hazmat'
   | 'reminders';
+
+export type AppView = 'builder' | 'shipments' | 'chat';
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Date;
+  isLoading?: boolean;
+}
+
+export interface SavedShipment {
+  id: string;
+  invoiceNumber: string;
+  customerName: string;
+  shipDate: string;
+  totalValue: number;
+  totalGrossWeight: number;
+  itemCount: number;
+  products: string[];
+  createdAt: Date;
+  formData: ShipmentFormData;
+}

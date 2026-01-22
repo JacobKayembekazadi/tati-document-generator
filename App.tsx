@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   FileText,
   Package,
@@ -21,13 +21,27 @@ import {
   ListChecks,
   Copy,
   Check,
+  MessageCircle,
+  Send,
+  Bot,
+  User,
+  Key,
+  Sparkles,
+  RefreshCw,
+  Eye,
+  Calendar,
+  X,
 } from 'lucide-react';
+import OpenAI from 'openai';
 import {
   ShipmentFormData,
   ShipmentCalculations,
   DocumentTab,
   LineItem,
   PackagingType,
+  AppView,
+  ChatMessage,
+  SavedShipment,
 } from './types';
 import {
   PRODUCT_DATABASE,
@@ -43,9 +57,30 @@ import {
 } from './constants';
 
 const App: React.FC = () => {
-  const [view, setView] = useState<'builder' | 'dashboard'>('builder');
+  const [view, setView] = useState<AppView>('builder');
   const [activeDoc, setActiveDoc] = useState<DocumentTab>('summary');
   const [copiedDoc, setCopiedDoc] = useState<string | null>(null);
+
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: '1',
+      role: 'assistant',
+      content: "Hi! I'm your TATI shipping assistant. I can help you:\n\n• Create shipments (e.g., \"Create shipment for 20 totes of TATI Y-07 to Pemex\")\n• Answer questions about products (e.g., \"What's the UN number for TATI CLR-07?\")\n• Explain documents and requirements\n• Auto-fill customer information\n\nHow can I help you today?",
+      timestamp: new Date(),
+    },
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('openai_api_key') || '');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Saved shipments state
+  const [savedShipments, setSavedShipments] = useState<SavedShipment[]>(() => {
+    const saved = localStorage.getItem('saved_shipments');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const [formData, setFormData] = useState<ShipmentFormData>({
     items: [
@@ -230,6 +265,200 @@ const App: React.FC = () => {
   const currentYear = new Date(formData.shipDate + 'T00:00:00').getFullYear();
   const labId = generateLabId(formData.shipDate);
 
+  // Scroll chat to bottom when new messages arrive
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  // Save API key to localStorage when it changes
+  useEffect(() => {
+    if (apiKey) {
+      localStorage.setItem('openai_api_key', apiKey);
+    }
+  }, [apiKey]);
+
+  // Save shipments to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('saved_shipments', JSON.stringify(savedShipments));
+  }, [savedShipments]);
+
+  // Save current shipment
+  const handleSaveShipment = () => {
+    const newShipment: SavedShipment = {
+      id: Date.now().toString(),
+      invoiceNumber: calculations.invoiceNumber,
+      customerName: formData.customerName || 'Unknown Customer',
+      shipDate: formData.shipDate,
+      totalValue: calculations.totalValue,
+      totalGrossWeight: calculations.totalGrossWeight,
+      itemCount: calculations.items.length,
+      products: calculations.items.map((item) => item.product.name),
+      createdAt: new Date(),
+      formData: { ...formData },
+    };
+    setSavedShipments((prev) => [newShipment, ...prev]);
+  };
+
+  // Load a saved shipment
+  const handleLoadShipment = (shipment: SavedShipment) => {
+    setFormData(shipment.formData);
+    setView('builder');
+  };
+
+  // Delete a saved shipment
+  const handleDeleteShipment = (id: string) => {
+    setSavedShipments((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  // OpenAI Chat function
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || isChatLoading) return;
+
+    if (!apiKey) {
+      setShowApiKeyInput(true);
+      return;
+    }
+
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: chatInput,
+      timestamp: new Date(),
+    };
+
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatInput('');
+    setIsChatLoading(true);
+
+    // Add loading message
+    const loadingMessage: ChatMessage = {
+      id: 'loading',
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isLoading: true,
+    };
+    setChatMessages((prev) => [...prev, loadingMessage]);
+
+    try {
+      const openai = new OpenAI({
+        apiKey: apiKey,
+        dangerouslyAllowBrowser: true,
+      });
+
+      const systemPrompt = `You are a helpful assistant for Texas American Trade, Inc. (TATI), a company that exports petroleum chemical additives from Houston, TX to Mexico via Laredo.
+
+PRODUCTS DATABASE (22 products):
+${PRODUCT_DATABASE.map((p) => `- ${p.name} (ID: ${p.id}): UN# ${p.unNumber}, Hazard Class: ${p.hazardClass}, Density: ${p.density}, Tote: ${p.kgPerTote}kg, Drum: ${p.kgPerDrum}kg`).join('\n')}
+
+CURRENT SHIPMENT INFO:
+- Invoice: ${calculations.invoiceNumber}
+- Customer: ${formData.customerName || 'Not set'}
+- Ship Date: ${formData.shipDate}
+- Products: ${calculations.items.map((i) => `${i.quantity} ${i.unitType} of ${i.product.name}`).join(', ')}
+- Total Value: $${calculations.totalValue.toLocaleString()}
+- Total Weight: ${calculations.totalGrossWeight.toLocaleString()} KG
+- Has Hazmat: ${calculations.hasHazmat ? 'Yes' : 'No'}
+
+When users ask to CREATE a shipment, respond with a JSON block in this format:
+\`\`\`json
+{
+  "action": "create_shipment",
+  "items": [{"productId": "P13", "quantity": 20, "unitType": "totes", "unitPrice": 2450}],
+  "customerName": "Customer Name",
+  "mexicoAddress": "Address in Mexico",
+  "rfc": "RFC123456ABC"
+}
+\`\`\`
+
+When users ask to UPDATE customer info, respond with:
+\`\`\`json
+{
+  "action": "update_customer",
+  "customerName": "New Name",
+  "mexicoAddress": "New Address",
+  "rfc": "RFC123"
+}
+\`\`\`
+
+Be helpful, concise, and knowledgeable about international shipping, hazmat regulations, and Mexican customs requirements.`;
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...chatMessages.filter((m) => !m.isLoading).map((m) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          })),
+          { role: 'user', content: chatInput },
+        ],
+        max_tokens: 1000,
+      });
+
+      const assistantContent = response.choices[0]?.message?.content || 'Sorry, I could not process that request.';
+
+      // Check for JSON actions in the response
+      const jsonMatch = assistantContent.match(/```json\n([\s\S]*?)\n```/);
+      if (jsonMatch) {
+        try {
+          const actionData = JSON.parse(jsonMatch[1]);
+
+          if (actionData.action === 'create_shipment') {
+            const newItems = actionData.items.map((item: { productId: string; quantity: number; unitType: string; unitPrice: number }) => ({
+              id: Date.now() + Math.random(),
+              productId: item.productId,
+              quantity: item.quantity,
+              unitType: item.unitType as PackagingType,
+              unitPrice: item.unitPrice || 0,
+              lotNumber: generateLotNumber(),
+            }));
+
+            setFormData((prev) => ({
+              ...prev,
+              items: newItems,
+              customerName: actionData.customerName || prev.customerName,
+              mexicoAddress: actionData.mexicoAddress || prev.mexicoAddress,
+              rfc: actionData.rfc || prev.rfc,
+            }));
+          } else if (actionData.action === 'update_customer') {
+            setFormData((prev) => ({
+              ...prev,
+              customerName: actionData.customerName || prev.customerName,
+              mexicoAddress: actionData.mexicoAddress || prev.mexicoAddress,
+              rfc: actionData.rfc || prev.rfc,
+            }));
+          }
+        } catch {
+          // JSON parsing failed, just show the message
+        }
+      }
+
+      // Remove loading message and add actual response
+      setChatMessages((prev) => [
+        ...prev.filter((m) => m.id !== 'loading'),
+        {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: assistantContent.replace(/```json\n[\s\S]*?\n```/g, '').trim() || 'Done! I\'ve updated the shipment for you.',
+          timestamp: new Date(),
+        },
+      ]);
+    } catch (error) {
+      setChatMessages((prev) => [
+        ...prev.filter((m) => m.id !== 'loading'),
+        {
+          id: Date.now().toString(),
+          role: 'assistant',
+          content: `Error: ${error instanceof Error ? error.message : 'Failed to connect to OpenAI. Please check your API key.'}`,
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
   const handleCopyDocument = (docId: string) => {
     const docElement = document.getElementById(`doc-${docId}`);
     if (docElement) {
@@ -287,30 +516,254 @@ const App: React.FC = () => {
                 <LayoutDashboard size={14} /> Builder
               </button>
               <button
-                onClick={() => setView('dashboard')}
+                onClick={() => setView('shipments')}
                 className={`px-4 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-all ${
-                  view === 'dashboard'
+                  view === 'shipments'
                     ? 'bg-slate-700 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <History size={14} /> Saved Shipments
+                <History size={14} /> Shipments
+              </button>
+              <button
+                onClick={() => setView('chat')}
+                className={`px-4 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-all ${
+                  view === 'chat'
+                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Sparkles size={14} /> AI Chat
               </button>
             </nav>
           </div>
 
           <div className="flex items-center gap-3">
             <button
+              onClick={handleSaveShipment}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all text-sm font-bold shadow-lg"
+            >
+              <CheckCircle2 size={16} /> Save
+            </button>
+            <button
               onClick={() => window.print()}
               className="bg-white text-slate-900 hover:bg-slate-100 px-4 py-2 rounded-lg flex items-center gap-2 transition-all text-sm font-bold shadow-lg"
             >
-              <Printer size={16} /> Print Packet
+              <Printer size={16} /> Print
             </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 mt-4">
+      <main className="max-w-7xl mx-auto p-4 md:p-6 mt-4">
+        {/* Chat View */}
+        {view === 'chat' && (
+          <div className="max-w-4xl mx-auto print:hidden">
+            <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+              {/* Chat Header */}
+              <div className="bg-gradient-to-r from-purple-600 to-blue-600 p-4 text-white">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                      <Sparkles size={20} />
+                    </div>
+                    <div>
+                      <h2 className="font-bold text-lg">TATI AI Assistant</h2>
+                      <p className="text-white/70 text-xs">Powered by GPT-4o-mini</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                    className="bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-all"
+                    title="API Key Settings"
+                  >
+                    <Key size={16} />
+                  </button>
+                </div>
+
+                {/* API Key Input */}
+                {showApiKeyInput && (
+                  <div className="mt-4 bg-white/10 p-3 rounded-lg">
+                    <label className="text-xs font-bold text-white/70 block mb-1">OpenAI API Key</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder="sk-..."
+                        className="flex-1 bg-white/20 border border-white/20 rounded-lg px-3 py-2 text-sm text-white placeholder-white/50 focus:outline-none focus:border-white/50"
+                      />
+                      <button
+                        onClick={() => setShowApiKeyInput(false)}
+                        className="bg-white/20 hover:bg-white/30 px-3 py-2 rounded-lg text-xs font-bold"
+                      >
+                        Save
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-white/50 mt-1">Your key is stored locally in your browser.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Chat Messages */}
+              <div className="h-[500px] overflow-y-auto p-4 space-y-4 bg-slate-50">
+                {chatMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    {message.role === 'assistant' && (
+                      <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Bot size={16} className="text-white" />
+                      </div>
+                    )}
+                    <div
+                      className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                        message.role === 'user'
+                          ? 'bg-blue-600 text-white rounded-br-md'
+                          : 'bg-white border border-slate-200 text-slate-800 rounded-bl-md shadow-sm'
+                      }`}
+                    >
+                      {message.isLoading ? (
+                        <div className="flex items-center gap-2">
+                          <RefreshCw size={14} className="animate-spin" />
+                          <span className="text-sm">Thinking...</span>
+                        </div>
+                      ) : (
+                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      )}
+                      <p className={`text-[10px] mt-1 ${message.role === 'user' ? 'text-blue-200' : 'text-slate-400'}`}>
+                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    {message.role === 'user' && (
+                      <div className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <User size={16} className="text-white" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Chat Input */}
+              <div className="p-4 border-t border-slate-200 bg-white">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                    placeholder={apiKey ? "Ask me anything about shipping, products, or create a shipment..." : "Enter your API key first..."}
+                    disabled={!apiKey}
+                    className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100"
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!chatInput.trim() || isChatLoading || !apiKey}
+                    className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-6 py-3 rounded-xl flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm"
+                  >
+                    <Send size={16} />
+                  </button>
+                </div>
+                <div className="flex gap-2 mt-3 flex-wrap">
+                  {['Create shipment for 20 totes of TATI Y-07', 'What products are hazmat?', 'Explain USMCA certificate'].map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      onClick={() => setChatInput(suggestion)}
+                      className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-full transition-all"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Shipments History View */}
+        {view === 'shipments' && (
+          <div className="max-w-5xl mx-auto print:hidden">
+            <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+              <div className="bg-slate-900 p-4 text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <History size={20} />
+                  <h2 className="font-bold text-lg">Saved Shipments</h2>
+                </div>
+                <span className="text-slate-400 text-sm">{savedShipments.length} shipments</span>
+              </div>
+
+              {savedShipments.length === 0 ? (
+                <div className="p-12 text-center">
+                  <Package size={48} className="mx-auto text-slate-300 mb-4" />
+                  <h3 className="text-lg font-bold text-slate-600 mb-2">No saved shipments</h3>
+                  <p className="text-slate-400 text-sm mb-4">Create a shipment in the Builder and click "Save" to store it here.</p>
+                  <button
+                    onClick={() => setView('builder')}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg text-sm font-bold transition-all"
+                  >
+                    Go to Builder
+                  </button>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {savedShipments.map((shipment) => (
+                    <div key={shipment.id} className="p-4 hover:bg-slate-50 transition-all">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold">
+                              #{shipment.invoiceNumber}
+                            </span>
+                            <span className="text-slate-400 text-xs flex items-center gap-1">
+                              <Calendar size={12} />
+                              {new Date(shipment.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <h3 className="font-bold text-slate-800">{shipment.customerName}</h3>
+                          <p className="text-sm text-slate-500">
+                            {shipment.itemCount} item(s): {shipment.products.slice(0, 2).join(', ')}
+                            {shipment.products.length > 2 && ` +${shipment.products.length - 2} more`}
+                          </p>
+                          <div className="flex gap-4 mt-2 text-xs">
+                            <span className="text-green-600 font-bold">
+                              ${shipment.totalValue.toLocaleString()}
+                            </span>
+                            <span className="text-slate-400">
+                              {shipment.totalGrossWeight.toLocaleString()} KG
+                            </span>
+                            <span className="text-slate-400">
+                              Ship: {shipment.shipDate}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleLoadShipment(shipment)}
+                            className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1"
+                          >
+                            <Eye size={14} /> Load
+                          </button>
+                          <button
+                            onClick={() => handleDeleteShipment(shipment.id)}
+                            className="bg-red-100 hover:bg-red-200 text-red-600 p-2 rounded-lg transition-all"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Builder View */}
+        {view === 'builder' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Sidebar: Configurator */}
         <div className="lg:col-span-4 space-y-6 print:hidden">
           {/* Weight Compliance */}
@@ -1651,6 +2104,8 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
+        </div>
+        )}
       </main>
 
       {/* Floating UI */}
