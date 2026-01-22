@@ -25,8 +25,8 @@ import {
   Send,
   Bot,
   User,
-  Key,
   Sparkles,
+  BarChart3,
   RefreshCw,
   Eye,
   Calendar,
@@ -153,7 +153,21 @@ interface ValidationErrors {
   broker?: string;
   items?: string;
 }
-import OpenAI from 'openai';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 import {
   ShipmentFormData,
   ShipmentCalculations,
@@ -177,7 +191,71 @@ import {
   generateLabId,
 } from './constants';
 
-// Markdown-like formatting for chat messages
+// Chart colors for visualizations
+const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
+
+// Chart rendering component
+interface ChartData {
+  type: 'bar' | 'line' | 'pie';
+  title?: string;
+  data: Array<{ name: string; value: number; [key: string]: string | number }>;
+  xKey?: string;
+  yKey?: string;
+}
+
+const DynamicChart: React.FC<{ chartData: ChartData; chartKey: string }> = ({ chartData, chartKey }) => {
+  const { type, title, data, xKey = 'name', yKey = 'value' } = chartData;
+
+  return (
+    <div className="my-4 p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
+      {title && <h4 className="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2"><BarChart3 size={16} className="text-blue-600" />{title}</h4>}
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          {type === 'bar' ? (
+            <BarChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey={xKey} tick={{ fontSize: 11 }} stroke="#64748b" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#64748b" />
+              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey={yKey} fill="#3b82f6" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          ) : type === 'line' ? (
+            <LineChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey={xKey} tick={{ fontSize: 11 }} stroke="#64748b" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#64748b" />
+              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey={yKey} stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6' }} />
+            </LineChart>
+          ) : (
+            <PieChart>
+              <Pie
+                data={data}
+                dataKey={yKey}
+                nameKey={xKey}
+                cx="50%"
+                cy="50%"
+                outerRadius={80}
+                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                labelLine={{ stroke: '#64748b' }}
+              >
+                {data.map((_, index) => (
+                  <Cell key={`cell-${chartKey}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+            </PieChart>
+          )}
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+
+// Markdown-like formatting for chat messages with chart support
 const FormattedMessage: React.FC<{ content: string; isUser?: boolean }> = ({ content, isUser }) => {
   const formatContent = (text: string): React.ReactNode[] => {
     const elements: React.ReactNode[] = [];
@@ -240,6 +318,19 @@ const FormattedMessage: React.FC<{ content: string; isUser?: boolean }> = ({ con
 
     const flushCodeBlock = () => {
       if (codeBlockContent.length > 0) {
+        // Check if it's a chart block
+        if (codeBlockLang === 'chart') {
+          try {
+            const chartData = JSON.parse(codeBlockContent.join('\n')) as ChartData;
+            elements.push(<DynamicChart key={`chart-${i}`} chartData={chartData} chartKey={`chart-${i}`} />);
+            codeBlockContent = [];
+            codeBlockLang = '';
+            return;
+          } catch {
+            // If JSON parsing fails, render as regular code block
+          }
+        }
+
         elements.push(
           <div key={`code-${i}`} className="my-3">
             {codeBlockLang && (
@@ -477,22 +568,13 @@ const App: React.FC = () => {
     {
       id: '1',
       role: 'assistant',
-      content: "Hi! I'm your TATI shipping assistant. I can help you:\n\n• Create shipments (e.g., \"Create shipment for 20 totes of TATI Y-07 to Pemex\")\n• Answer questions about products (e.g., \"What's the UN number for TATI CLR-07?\")\n• Explain documents and requirements\n• Auto-fill customer information\n\nHow can I help you today?",
+      content: "Hi! I'm your TATI shipping assistant. I can help you:\n\n• **Create shipments** - \"Create shipment for 20 totes of TATI Y-07 to Pemex\"\n• **Product info** - \"What's the UN number for TATI CLR-07?\"\n• **Visualize data** - \"Show me a chart of shipment weights\"\n• **Generate tables** - \"Compare hazmat classes for all products\"\n• **Explain documents** - USMCA, hazmat, customs requirements\n\nJust type your question below!",
       timestamp: new Date(),
     },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
-  const [apiKey, setApiKey] = useState(() => {
-    try {
-      return localStorage.getItem('openai_api_key') || '';
-    } catch (e) {
-      console.error('Failed to load API key:', e);
-      return '';
-    }
-  });
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+    const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Saved shipments state - with error handling
   const [savedShipments, setSavedShipments] = useState<SavedShipment[]>(() => {
@@ -700,18 +782,7 @@ const App: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Save API key to localStorage when it changes
-  useEffect(() => {
-    if (apiKey) {
-      try {
-        localStorage.setItem('openai_api_key', apiKey);
-      } catch (e) {
-        console.error('Failed to save API key:', e);
-        showToast('Failed to save API key. Storage may be full.', 'error');
-      }
-    }
-  }, [apiKey, showToast]);
-
+  
   // Save shipments to localStorage when they change
   useEffect(() => {
     try {
@@ -813,14 +884,9 @@ const App: React.FC = () => {
     );
   };
 
-  // OpenAI Chat function
+  // Server-side Chat function (no API key needed from user)
   const handleSendMessage = async () => {
     if (!chatInput.trim() || isChatLoading) return;
-
-    if (!apiKey) {
-      setShowApiKeyInput(true);
-      return;
-    }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -830,6 +896,7 @@ const App: React.FC = () => {
     };
 
     setChatMessages((prev) => [...prev, userMessage]);
+    const currentInput = chatInput;
     setChatInput('');
     setIsChatLoading(true);
 
@@ -844,64 +911,39 @@ const App: React.FC = () => {
     setChatMessages((prev) => [...prev, loadingMessage]);
 
     try {
-      const openai = new OpenAI({
-        apiKey: apiKey,
-        dangerouslyAllowBrowser: true,
+      // Call server-side API (API key is stored in Vercel env vars)
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            ...chatMessages.filter((m) => !m.isLoading).map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+            { role: 'user', content: currentInput },
+          ],
+          shipmentContext: {
+            invoiceNumber: calculations.invoiceNumber,
+            customerName: formData.customerName,
+            shipDate: formData.shipDate,
+            products: calculations.items.map((i) => `${i.quantity} ${i.unitType} of ${i.product.name}`).join(', '),
+            totalValue: calculations.totalValue,
+            totalGrossWeight: calculations.totalGrossWeight,
+            hasHazmat: calculations.hasHazmat,
+          },
+        }),
       });
 
-      const systemPrompt = `You are a helpful assistant for Texas American Trade, Inc. (TATI), a company that exports petroleum chemical additives from Houston, TX to Mexico via Laredo.
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to get response');
+      }
 
-PRODUCTS DATABASE (22 products):
-${PRODUCT_DATABASE.map((p) => `- ${p.name} (ID: ${p.id}): UN# ${p.unNumber}, Hazard Class: ${p.hazardClass}, Density: ${p.density}, Tote: ${p.kgPerTote}kg, Drum: ${p.kgPerDrum}kg`).join('\n')}
+      const data = await response.json();
+      const assistantContent = data.content || 'Sorry, I could not process that request.';
 
-CURRENT SHIPMENT INFO:
-- Invoice: ${calculations.invoiceNumber}
-- Customer: ${formData.customerName || 'Not set'}
-- Ship Date: ${formData.shipDate}
-- Products: ${calculations.items.map((i) => `${i.quantity} ${i.unitType} of ${i.product.name}`).join(', ')}
-- Total Value: $${calculations.totalValue.toLocaleString()}
-- Total Weight: ${calculations.totalGrossWeight.toLocaleString()} KG
-- Has Hazmat: ${calculations.hasHazmat ? 'Yes' : 'No'}
-
-When users ask to CREATE a shipment, respond with a JSON block in this format:
-\`\`\`json
-{
-  "action": "create_shipment",
-  "items": [{"productId": "P13", "quantity": 20, "unitType": "totes", "unitPrice": 2450}],
-  "customerName": "Customer Name",
-  "mexicoAddress": "Address in Mexico",
-  "rfc": "RFC123456ABC"
-}
-\`\`\`
-
-When users ask to UPDATE customer info, respond with:
-\`\`\`json
-{
-  "action": "update_customer",
-  "customerName": "New Name",
-  "mexicoAddress": "New Address",
-  "rfc": "RFC123"
-}
-\`\`\`
-
-Be helpful, concise, and knowledgeable about international shipping, hazmat regulations, and Mexican customs requirements.`;
-
-      const response = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...chatMessages.filter((m) => !m.isLoading).map((m) => ({
-            role: m.role as 'user' | 'assistant',
-            content: m.content,
-          })),
-          { role: 'user', content: chatInput },
-        ],
-        max_tokens: 1000,
-      });
-
-      const assistantContent = response.choices[0]?.message?.content || 'Sorry, I could not process that request.';
-
-      // Check for JSON actions in the response
+      // Check for JSON actions in the response (shipment commands)
       const jsonMatch = assistantContent.match(/```json\n([\s\S]*?)\n```/);
       if (jsonMatch) {
         try {
@@ -924,6 +966,7 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
               mexicoAddress: actionData.mexicoAddress || prev.mexicoAddress,
               rfc: actionData.rfc || prev.rfc,
             }));
+            showToast('Shipment created from AI command', 'success');
           } else if (actionData.action === 'update_customer') {
             setFormData((prev) => ({
               ...prev,
@@ -931,6 +974,7 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
               mexicoAddress: actionData.mexicoAddress || prev.mexicoAddress,
               rfc: actionData.rfc || prev.rfc,
             }));
+            showToast('Customer info updated', 'success');
           }
         } catch {
           // JSON parsing failed, just show the message
@@ -938,12 +982,17 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
       }
 
       // Remove loading message and add actual response
+      // Keep chart blocks but remove action JSON blocks
+      const cleanedContent = assistantContent
+        .replace(/```json\n\{[\s\S]*?"action"[\s\S]*?\}\n```/g, '')
+        .trim() || 'Done! I\'ve updated the shipment for you.';
+
       setChatMessages((prev) => [
         ...prev.filter((m) => m.id !== 'loading'),
         {
           id: Date.now().toString(),
           role: 'assistant',
-          content: assistantContent.replace(/```json\n[\s\S]*?\n```/g, '').trim() || 'Done! I\'ve updated the shipment for you.',
+          content: cleanedContent,
           timestamp: new Date(),
         },
       ]);
@@ -953,10 +1002,11 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
         {
           id: Date.now().toString(),
           role: 'assistant',
-          content: `Error: ${error instanceof Error ? error.message : 'Failed to connect to OpenAI. Please check your API key.'}`,
+          content: `Error: ${error instanceof Error ? error.message : 'Failed to connect to AI service.'}`,
           timestamp: new Date(),
         },
       ]);
+      showToast('Failed to send message', 'error');
     } finally {
       setIsChatLoading(false);
     }
@@ -1072,40 +1122,15 @@ Be helpful, concise, and knowledgeable about international shipping, hazmat regu
                     </div>
                     <div>
                       <h2 className="font-bold text-lg">TATI AI Assistant</h2>
-                      <p className="text-white/70 text-xs">Powered by GPT-4o-mini</p>
+                      <p className="text-white/70 text-xs">Powered by GPT-4o-mini • Ask me anything!</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-                    className="bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-all"
-                    title="API Key Settings"
-                  >
-                    <Key size={16} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-green-500/30 text-green-200 px-2 py-1 rounded-full">
+                      ● Connected
+                    </span>
+                  </div>
                 </div>
-
-                {/* API Key Input */}
-                {showApiKeyInput && (
-                  <div className="mt-4 bg-white/10 p-3 rounded-lg">
-                    <label className="text-xs font-bold text-white/70 block mb-1">OpenAI API Key</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder="sk-..."
-                        className="flex-1 bg-white/20 border border-white/20 rounded-lg px-3 py-2 text-sm text-white placeholder-white/50 focus:outline-none focus:border-white/50"
-                      />
-                      <button
-                        onClick={() => setShowApiKeyInput(false)}
-                        className="bg-white/20 hover:bg-white/30 px-3 py-2 rounded-lg text-xs font-bold"
-                      >
-                        Save
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-white/50 mt-1">Your key is stored locally in your browser.</p>
-                  </div>
-                )}
               </div>
 
               {/* Chat Messages */}
