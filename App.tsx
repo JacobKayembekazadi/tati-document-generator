@@ -598,10 +598,10 @@ const App: React.FC = () => {
     items: [
       {
         id: Date.now(),
-        productId: 'P13',
-        quantity: 20,
+        productId: '',
+        quantity: 0,
         unitType: 'totes',
-        unitPrice: 2450.0,
+        unitPrice: 0,
         lotNumber: generateLotNumber(),
       },
     ],
@@ -687,8 +687,8 @@ const App: React.FC = () => {
         ...prev.items,
         {
           id: Date.now(),
-          productId: 'P01',
-          quantity: 1,
+          productId: '',
+          quantity: 0,
           unitType: 'totes' as PackagingType,
           unitPrice: 0,
           lotNumber: generateLotNumber(),
@@ -1375,6 +1375,7 @@ const App: React.FC = () => {
                         paddingRight: '2.5rem',
                       }}
                     >
+                      <option value="">-- Select Product --</option>
                       {PRODUCT_DATABASE.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
